@@ -26,7 +26,8 @@ import sys
 
 import eventlet
 from oslo_utils import encodeutils
-
+import sys
+sys.path.append('/opt/stack/xmonitor')
 
 # Monkey patch socket, time, select, threads
 eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
@@ -40,7 +41,7 @@ possible_topdir = os.path.normpath(os.path.join(os.path.abspath(sys.argv[0]),
 if os.path.exists(os.path.join(possible_topdir, 'xmonitor', '__init__.py')):
     sys.path.insert(0, possible_topdir)
 
-import glance_store
+# import glance_store
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -48,7 +49,7 @@ import osprofiler.notifier
 import osprofiler.web
 
 from xmonitor.common import config
-from xmonitor.common import exception
+# from xmonitor.common import exception
 from xmonitor.common import wsgi
 from xmonitor import notifier
 
@@ -56,9 +57,9 @@ CONF = cfg.CONF
 CONF.import_group("profiler", "xmonitor.common.wsgi")
 logging.register_options(CONF)
 
-KNOWN_EXCEPTIONS = (RuntimeError,
-                    exception.WorkerCreationFailure,
-                    glance_store.exceptions.BadStoreConfiguration)
+# KNOWN_EXCEPTIONS = (RuntimeError,
+#                     exception.WorkerCreationFailure,
+#                     glance_store.exceptions.BadStoreConfiguration)
 
 
 def fail(e):
@@ -69,29 +70,27 @@ def fail(e):
 
 
 def main():
-    try:
-        config.parse_args()
-        config.set_config_defaults()
-        wsgi.set_eventlet_hub()
-        logging.setup(CONF, 'xmonitor')
-        notifier.set_defaults()
+    config.parse_args()
+    config.set_config_defaults()
+    wsgi.set_eventlet_hub()
+    logging.setup(CONF, 'xmonitor')
+    notifier.set_defaults()
+    if cfg.CONF.profiler.enabled:
+        _notifier = osprofiler.notifier.create("Messaging",
+                                               oslo_messaging, {},
+                                               notifier.get_transport(),
+                                               "xmonitor", "api",
+                                               cfg.CONF.bind_host)
+        osprofiler.notifier.set(_notifier)
+        osprofiler.web.enable(cfg.CONF.profiler.hmac_keys)
+    else:
+        osprofiler.web.disable()
 
-        if cfg.CONF.profiler.enabled:
-            _notifier = osprofiler.notifier.create("Messaging",
-                                                   oslo_messaging, {},
-                                                   notifier.get_transport(),
-                                                   "xmonitor", "api",
-                                                   cfg.CONF.bind_host)
-            osprofiler.notifier.set(_notifier)
-            osprofiler.web.enable(cfg.CONF.profiler.hmac_keys)
-        else:
-            osprofiler.web.disable()
-
-        server = wsgi.Server(initialize_glance_store=True)
-        server.start(config.load_paste_app('xmonitor-api'), default_port=9292)
-        server.wait()
-    except KNOWN_EXCEPTIONS as e:
-        fail(e)
+    server = wsgi.Server(initialize_glance_store=True)
+    import pdb
+    pdb.set_trace()
+    server.start(config.load_paste_app('xmonitor-api'), default_port=9696)
+    server.wait()
 
 
 if __name__ == '__main__':
