@@ -259,8 +259,6 @@ def load_paste_app(app_name, flavor=None, conf_file=None):
         app = deploy.loadapp("config:%s" % conf_file, name=app_name)
 
         # Log the options used when starting if we're in debug mode...
-        import pdb
-        pdb.set_trace()
         if CONF.debug:
             CONF.log_opt_values(logger, logging.DEBUG)
 

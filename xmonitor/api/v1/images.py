@@ -278,8 +278,8 @@ class Controller(controller.BaseController):
                     key, 'read', req.context)
                 if ((self.prop_enforcer.check_property_rules(
                         key, 'update', req.context) is False and
-                        image_meta['properties'][key] !=
-                        orig_meta['properties'][key]) or not has_read):
+                             image_meta['properties'][key] !=
+                             orig_meta['properties'][key]) or not has_read):
                     msg = _("Property '%s' is protected") % key
                     LOG.warn(msg)
                     raise HTTPForbidden(explanation=msg,
@@ -832,7 +832,7 @@ class Controller(controller.BaseController):
                     # the driver encountered an error. In this case the
                     # size provided by the client will be used as-is.
                     if (image_size_store and
-                            image_size_store != image_size_meta):
+                                image_size_store != image_size_meta):
                         msg = (_("Provided image size must match the stored"
                                  " image size. (provided size: %(ps)d, "
                                  "stored size: %(ss)d)") %
@@ -973,8 +973,8 @@ class Controller(controller.BaseController):
             # modify certain core metadata keys
             for key in ACTIVE_IMMUTABLE:
                 if ((orig_status == 'active' or orig_status == 'deactivated')
-                        and key in image_meta
-                        and image_meta.get(key) != orig_image_meta.get(key)):
+                    and key in image_meta
+                    and image_meta.get(key) != orig_image_meta.get(key)):
                     msg = _("Forbidden to modify '%(key)s' of %(status)s "
                             "image.") % {'key': key, 'status': orig_status}
                     raise HTTPForbidden(explanation=msg,
@@ -983,7 +983,7 @@ class Controller(controller.BaseController):
 
         for key in IMMUTABLE:
             if (key in image_meta and
-                    image_meta.get(key) != orig_image_meta.get(key)):
+                        image_meta.get(key) != orig_image_meta.get(key)):
                 msg = _("Forbidden to modify '%s' of image.") % key
                 raise HTTPForbidden(explanation=msg,
                                     request=req,
@@ -1213,138 +1213,6 @@ class Controller(controller.BaseController):
                                  content_type='text/plain')
 
 
-class ImageDeserializer(wsgi.JSONRequestDeserializer):
-    """Handles deserialization of specific controller method requests."""
-
-    def _deserialize(self, request):
-        result = {}
-        try:
-            result['image_meta'] = utils.get_image_meta_from_headers(request)
-        except exception.InvalidParameterValue as e:
-            msg = encodeutils.exception_to_unicode(e)
-            LOG.warn(msg, exc_info=True)
-            raise HTTPBadRequest(explanation=e.msg, request=request)
-
-        image_meta = result['image_meta']
-        image_meta = validate_image_meta(request, image_meta)
-        if request.content_length:
-            image_size = request.content_length
-        elif 'size' in image_meta:
-            image_size = image_meta['size']
-        else:
-            image_size = None
-
-        data = request.body_file if self.has_body(request) else None
-
-        if image_size is None and data is not None:
-            data = utils.LimitingReader(data, CONF.image_size_cap)
-
-            # NOTE(bcwaldon): this is a hack to make sure the downstream code
-            # gets the correct image data
-            request.body_file = data
-
-        elif image_size is not None and image_size > CONF.image_size_cap:
-            max_image_size = CONF.image_size_cap
-            msg = (_("Denying attempt to upload image larger than %d"
-                     " bytes.") % max_image_size)
-            LOG.warn(msg)
-            raise HTTPBadRequest(explanation=msg, request=request)
-
-        result['image_data'] = data
-        return result
-
-    def create(self, request):
-        return self._deserialize(request)
-
-    def update(self, request):
-        return self._deserialize(request)
-
-
-class ImageSerializer(wsgi.JSONResponseSerializer):
-    """Handles serialization of specific controller method responses."""
-
-    def __init__(self):
-        self.notifier = notifier.Notifier()
-
-    def _inject_location_header(self, response, image_meta):
-        location = self._get_image_location(image_meta)
-        if six.PY2:
-            location = location.encode('utf-8')
-        response.headers['Location'] = location
-
-    def _inject_checksum_header(self, response, image_meta):
-        if image_meta['checksum'] is not None:
-            checksum = image_meta['checksum']
-            if six.PY2:
-                checksum = checksum.encode('utf-8')
-            response.headers['ETag'] = checksum
-
-    def _inject_image_meta_headers(self, response, image_meta):
-        """
-        Given a response and mapping of image metadata, injects
-        the Response with a set of HTTP headers for the image
-        metadata. Each main image metadata field is injected
-        as a HTTP header with key 'x-image-meta-<FIELD>' except
-        for the properties field, which is further broken out
-        into a set of 'x-image-meta-property-<KEY>' headers
-
-        :param response: The Webob Response object
-        :param image_meta: Mapping of image metadata
-        """
-        headers = utils.image_meta_to_http_headers(image_meta)
-
-        for k, v in headers.items():
-            if six.PY3:
-                response.headers[str(k)] = str(v)
-            else:
-                response.headers[k.encode('utf-8')] = v.encode('utf-8')
-
-    def _get_image_location(self, image_meta):
-        """Build a relative url to reach the image defined by image_meta."""
-        return "/v1/images/%s" % image_meta['id']
-
-    def meta(self, response, result):
-        image_meta = result['image_meta']
-        self._inject_image_meta_headers(response, image_meta)
-        self._inject_checksum_header(response, image_meta)
-        return response
-
-    def show(self, response, result):
-        image_meta = result['image_meta']
-
-        image_iter = result['image_iterator']
-        # image_meta['size'] should be an int, but could possibly be a str
-        expected_size = int(image_meta['size'])
-        response.app_iter = common.size_checked_iter(
-            response, image_meta, expected_size, image_iter, self.notifier)
-        # Using app_iter blanks content-length, so we set it here...
-        response.headers['Content-Length'] = str(image_meta['size'])
-        response.headers['Content-Type'] = 'application/octet-stream'
-
-        self._inject_image_meta_headers(response, image_meta)
-        self._inject_checksum_header(response, image_meta)
-
-        return response
-
-    def update(self, response, result):
-        image_meta = result['image_meta']
-        response.body = self.to_json(dict(image=image_meta))
-        response.headers['Content-Type'] = 'application/json'
-        self._inject_checksum_header(response, image_meta)
-        return response
-
-    def create(self, response, result):
-        image_meta = result['image_meta']
-        response.status = 201
-        response.headers['Content-Type'] = 'application/json'
-        response.body = self.to_json(dict(image=image_meta))
-        self._inject_location_header(response, image_meta)
-        self._inject_checksum_header(response, image_meta)
-        return response
-
-
 def create_resource():
-    """Images resource factory method"""
-    deserializer = ImageDeserializer()
-    serializer = ImageSerializer()
-    return wsgi.Resource(Controller(), deserializer, serializer)
+    """Xmonitor resource factory method"""
+    return wsgi.Resource(Controller())
