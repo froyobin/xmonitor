@@ -87,8 +87,6 @@ def main():
         osprofiler.web.disable()
 
     server = wsgi.Server(initialize_glance_store=True)
-    import pdb
-    pdb.set_trace()
     server.start(config.load_paste_app('xmonitor-api'), default_port=9696)
     server.wait()
 
